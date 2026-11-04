@@ -1,9 +1,10 @@
-"""The initial upload -> source record -> source location workflow."""
+"""Document import, original source access, and local keyword retrieval."""
 import sqlite3
 from pathlib import PurePosixPath
 
 from .common import digest, now, uid
 from .formats import parse_text
+from .retrieval import search
 from .storage import Store
 
 
@@ -13,6 +14,9 @@ class Workspace:
 
     def documents(self):
         return self.store.documents()
+
+    def search(self, query, document_id=None, limit=20):
+        return search(self.store, query, document_id, limit)
 
     def upload(self, name, content):
         paragraphs = parse_text(name, content)

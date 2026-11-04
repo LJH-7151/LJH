@@ -7,6 +7,14 @@
     uploadForm: document.querySelector("#upload-form"),
     fileInput: document.querySelector("#file-input"),
     uploadButton: document.querySelector("#upload-button"),
+    searchPanel: document.querySelector("#search-panel"),
+    searchForm: document.querySelector("#search-form"),
+    searchQuery: document.querySelector("#search-query"),
+    searchDocument: document.querySelector("#search-document"),
+    searchButton: document.querySelector("#search-button"),
+    clearSearchButton: document.querySelector("#clear-search-button"),
+    searchStatus: document.querySelector("#search-status"),
+    searchResults: document.querySelector("#search-results"),
     refreshButton: document.querySelector("#refresh-button"),
     notice: document.querySelector("#notice"),
     count: document.querySelector("#document-count"),
@@ -28,6 +36,9 @@
   let documents = [];
   let selectedId = null;
   let detailRequest = 0;
+  let searchRequest = 0;
+  let searchController = null;
+  let searching = false;
   let uploading = false;
   let refreshing = false;
 
@@ -52,6 +63,11 @@
     elements.refreshButton.disabled = refreshing || uploading;
     elements.refreshButton.textContent = refreshing ? "读取中…" : "刷新";
     elements.uploadForm.setAttribute("aria-busy", String(uploading));
+    elements.searchQuery.disabled = uploading || refreshing;
+    elements.searchDocument.disabled = uploading || refreshing;
+    elements.searchButton.disabled = uploading || refreshing;
+    elements.searchButton.textContent = searching ? "检索中…" : "检索";
+    elements.searchPanel.setAttribute("aria-busy", String(searching));
   }
 
   async function requestJson(url, options = {}) {
@@ -110,7 +126,98 @@
     }
   }
 
-  async function selectDocument(id) {
+  function syncSearchDocuments() {
+    const previousId = elements.searchDocument.value;
+    const options = [createElement("option", "", "全部资料")];
+    options[0].value = "";
+    documents.forEach((item) => {
+      const option = createElement("option", "", item.filename);
+      option.value = item.id;
+      options.push(option);
+    });
+    elements.searchDocument.replaceChildren(...options);
+    elements.searchDocument.value = documents.some((item) => item.id === previousId) ? previousId : "";
+  }
+
+  function invalidateSearch(message = "输入关键词，查找本地资料中的原文段落。") {
+    ++searchRequest;
+    if (searchController) searchController.abort();
+    searchController = null;
+    searching = false;
+    elements.searchResults.replaceChildren();
+    elements.searchResults.hidden = true;
+    elements.searchStatus.textContent = message;
+    elements.searchStatus.setAttribute("role", "status");
+    updateBusyState();
+  }
+
+  function renderSearchResults(result) {
+    const count = result.results.length;
+    elements.searchStatus.textContent = result.total === 0
+      ? "没有找到匹配段落。请调整关键词或资料范围。"
+      : `共找到 ${result.total} 段匹配原文。${result.has_more ? `当前显示前 ${count} 条；每次最多显示 20 条，请缩小范围查看更多。` : `已显示全部 ${count} 条。`}`;
+    elements.searchResults.replaceChildren();
+    result.results.forEach((item) => {
+      const row = createElement("li", "search-result");
+      const heading = createElement("div", "result-heading");
+      const title = createElement("h3", "", item.title || item.filename);
+      const openButton = createElement("button", "button button-quiet", "查看原文");
+      openButton.type = "button";
+      openButton.addEventListener("click", () => selectDocument(item.document_id, item.chunk_id));
+      heading.append(title, openButton);
+      const meta = createElement("p", "result-meta");
+      meta.append(
+        createElement("span", "result-filename", item.filename),
+        createElement("span", "", `第 ${item.position} 段 · 原文第 ${item.start_line}–${item.end_line} 行`)
+      );
+      const fingerprint = createElement("details", "result-fingerprint");
+      fingerprint.append(
+        createElement("summary", "", `原件 SHA-256：${String(item.sha256).slice(0, 12)}…（展开查看）`),
+        createElement("code", "", item.sha256)
+      );
+      row.append(heading, meta, createElement("pre", "result-excerpt", item.excerpt), fingerprint);
+      elements.searchResults.append(row);
+    });
+    elements.searchResults.hidden = count === 0;
+  }
+
+  async function searchDocuments(event) {
+    event.preventDefault();
+    if (uploading || refreshing) return;
+    invalidateSearch();
+    const query = elements.searchQuery.value.trim();
+    const terms = query ? query.split(/\s+/u) : [];
+    if (!query || Array.from(query).length > 200 || terms.length > 8) {
+      elements.searchStatus.textContent = !query ? "请输入至少一个关键词。" : "检索内容最多 200 个字符、8 个关键词。";
+      elements.searchStatus.setAttribute("role", "alert");
+      elements.searchQuery.focus();
+      return;
+    }
+    const requestNumber = searchRequest;
+    searchController = new AbortController();
+    searching = true;
+    elements.searchStatus.textContent = "正在检索本地原文…";
+    updateBusyState();
+    const parameters = new URLSearchParams({ q: query, limit: "20" });
+    if (elements.searchDocument.value) parameters.set("document_id", elements.searchDocument.value);
+    try {
+      const result = await requestJson(`/api/search?${parameters}`, { signal: searchController.signal });
+      if (requestNumber !== searchRequest) return;
+      renderSearchResults(result);
+    } catch (error) {
+      if (requestNumber !== searchRequest) return;
+      elements.searchStatus.textContent = error.message;
+      elements.searchStatus.setAttribute("role", "alert");
+    } finally {
+      if (requestNumber === searchRequest) {
+        searchController = null;
+        searching = false;
+        updateBusyState();
+      }
+    }
+  }
+
+  async function selectDocument(id, chunkId = null) {
     selectedId = id;
     renderDocuments();
     const requestNumber = ++detailRequest;
@@ -123,6 +230,16 @@
       const result = await requestJson(`/api/document-text?id=${encodeURIComponent(id)}`);
       if (requestNumber !== detailRequest) return;
       renderDetail(result.document, result.chunks);
+      if (chunkId) {
+        const target = Array.from(elements.chunkList.children).find((element) => element.dataset.chunkId === chunkId);
+        if (target) {
+          target.classList.add("source-chunk-highlighted");
+          target.focus({ preventScroll: true });
+          target.scrollIntoView({ block: "center" });
+        } else {
+          showNotice("该来源段落已不可用，请刷新资料后重新检索。", "error");
+        }
+      }
     } catch (error) {
       if (requestNumber !== detailRequest) return;
       elements.detailStatus.textContent = error.message;
@@ -144,6 +261,8 @@
     elements.chunkList.replaceChildren();
     chunks.forEach((chunk, index) => {
       const article = createElement("article", "source-chunk");
+      article.dataset.chunkId = chunk.id;
+      article.tabIndex = -1;
       const heading = createElement("div", "chunk-heading");
       heading.append(
         createElement("h4", "", `第 ${index + 1} 段`),
@@ -164,10 +283,13 @@
   async function refreshDocuments(preferredId = null) {
     if (refreshing) return false;
     refreshing = true;
+    invalidateSearch("资料库正在刷新，完成后可重新检索。");
     updateBusyState();
     try {
       const result = await requestJson("/api/documents");
       documents = result.documents;
+      syncSearchDocuments();
+      invalidateSearch("资料库已刷新，输入关键词检索原文。");
       const nextId = preferredId || selectedId;
       const selection = documents.find((item) => item.id === nextId) || documents[0];
       selectedId = selection ? selection.id : null;
@@ -223,6 +345,7 @@
       return;
     }
     uploading = true;
+    invalidateSearch("导入资料后，请重新检索以获取最新结果。");
     updateBusyState();
     showNotice("正在导入资料…", "info");
     try {
@@ -254,6 +377,15 @@
 
   elements.refreshButton.addEventListener("click", () => refreshDocuments());
   elements.fileInput.addEventListener("change", () => { elements.notice.hidden = true; });
+  elements.searchForm.addEventListener("submit", searchDocuments);
+  elements.searchQuery.addEventListener("input", () => invalidateSearch("关键词已修改，请重新检索。"));
+  elements.searchDocument.addEventListener("change", () => invalidateSearch("资料范围已修改，请重新检索。"));
+  elements.clearSearchButton.addEventListener("click", () => {
+    elements.searchQuery.value = "";
+    elements.searchDocument.value = "";
+    invalidateSearch();
+    elements.searchQuery.focus();
+  });
 
   async function checkHealth() {
     try {

@@ -20,7 +20,7 @@
       <section class="intro" aria-labelledby="page-title">
         <p class="eyebrow">从原始资料开始</p>
         <h1 id="page-title">每一段内容，都有出处。</h1>
-        <p class="intro-description">导入文本，查看原始行号与文件指纹，随时下载原件。</p>
+        <p class="intro-description">导入文本，检索原文，查看原始行号与文件指纹。</p>
       </section>
 
       <section class="upload-panel" aria-labelledby="upload-title">
@@ -36,6 +36,18 @@
       </section>
 
       <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+
+      <section id="search-panel" class="search-panel panel" aria-labelledby="search-title" aria-busy="false">
+        <div class="search-heading"><h2 id="search-title">检索原文</h2><p id="search-help">多个关键词用空格分隔，在同一段中全部命中。最多 8 个词、200 个字符，仅检索本地资料。</p></div>
+        <form id="search-form" class="search-form">
+          <div class="search-query-field"><label for="search-query">关键词</label><input id="search-query" name="q" type="search" maxlength="200" placeholder="例如：营收 2025" aria-describedby="search-help" autocomplete="off"></div>
+          <div class="search-scope-field"><label for="search-document">资料范围</label><select id="search-document" name="document_id"><option value="">全部资料</option></select></div>
+          <button id="search-button" class="button button-primary" type="submit">检索</button>
+          <button id="clear-search-button" class="button button-quiet" type="button">清除</button>
+        </form>
+        <p id="search-status" class="search-status" role="status" aria-live="polite">输入关键词，查找本地资料中的原文段落。</p>
+        <ol id="search-results" class="search-results" aria-label="检索结果" hidden></ol>
+      </section>
 
       <div class="workspace">
         <section class="library panel" aria-labelledby="library-title">

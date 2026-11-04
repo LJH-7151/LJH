@@ -1,4 +1,4 @@
-"""Local-only HTTP interface for the first development milestone."""
+"""Local-only HTTP interface for the document workspace."""
 import argparse
 import base64
 import binascii
@@ -33,7 +33,7 @@ class LocalServer(ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "EvidenceLocal/0.1"
+    server_version = "EvidenceLocal/" + __version__
     timeout = 15
 
     def log_message(self, format, *args):
@@ -111,9 +111,16 @@ class Handler(BaseHTTPRequestHandler):
             content_type = "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8"
             self.respond(200, (STATIC / path[1:]).read_bytes(), content_type)
         elif path == "/api/health":
-            self.json({"status": "ok", "version": __version__, "milestone": "day1"})
+            self.json({"status": "ok", "version": __version__, "milestone": "day2"})
         elif path == "/api/documents":
             self.json({"documents": self.server.workspace.documents()})
+        elif path == "/api/search":
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            self.json(self.server.workspace.search(
+                query.get("q", [""])[0],
+                query.get("document_id", [""])[0] or None,
+                int(query.get("limit", ["20"])[0]),
+            ))
         elif path in ("/api/document-text", "/api/original"):
             document_id = parse_qs(parsed.query).get("id", [""])[0]
             if path == "/api/document-text":

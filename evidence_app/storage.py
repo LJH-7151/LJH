@@ -1,4 +1,4 @@
-"""SQLite persistence and immutable source files for the Day 1 workspace."""
+"""SQLite persistence, source files, and bounded local keyword lookup."""
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -98,6 +98,32 @@ class Store:
             chunk["location"] = f"第{start}行" if start == end else f"第{start}–{end}行"
             result.append(chunk)
         return result
+
+    def search_chunks(self, terms, document_id, limit):
+        # instr treats SQL wildcard characters as literal text. All values
+        # remain bound parameters; only fixed SQL fragments are assembled.
+        conditions = ["instr(lower(c.content), lower(?)) > 0" for _ in terms]
+        parameters = list(terms)
+        if document_id:
+            conditions.append("c.document_id=?")
+            parameters.append(document_id)
+        source = """
+            FROM chunks c
+            JOIN documents d ON d.id=c.document_id
+            JOIN uploads u ON u.id=d.upload_id
+        """
+        where = " WHERE " + " AND ".join(conditions)
+        with self.connect() as con:
+            total = con.execute("SELECT COUNT(*) " + source + where, parameters).fetchone()[0]
+            rows = con.execute(
+                """SELECT c.id AS chunk_id, c.document_id, c.position,
+                          c.start_line, c.end_line, c.content,
+                          d.title, u.name AS filename, u.sha256 """
+                + source + where
+                + " ORDER BY u.created_at DESC, d.id DESC, c.position, c.id LIMIT ?",
+                [*parameters, limit],
+            ).fetchall()
+        return total, [dict(row) for row in rows]
 
     def save(self, upload, document, chunks):
         with self.connect() as con:
