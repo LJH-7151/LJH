@@ -15,9 +15,10 @@ from . import __version__
 from .common import ValidationError
 from .formats import MAX_UPLOAD_BYTES
 from .service import Workspace
+from .tabular_import import MAX_BYTES as MAX_TABLE_BYTES
 
 STATIC = Path(__file__).parent / "static"
-MAX_REQUEST = 3 * 1024 * 1024
+MAX_REQUEST = 33 * 1024 * 1024
 
 
 class LocalServer(ThreadingHTTPServer):
@@ -114,6 +115,11 @@ class Handler(BaseHTTPRequestHandler):
             self.json({"status": "ok", "version": __version__, "milestone": "day2"})
         elif path == "/api/documents":
             self.json({"documents": self.server.workspace.documents()})
+        elif path == "/api/tables":
+            self.json({"tables": self.server.workspace.tables.list()})
+        elif path == "/api/table-result":
+            identifier = parse_qs(parsed.query).get('id', [''])[0]
+            self.json(self.server.workspace.tables.result(identifier))
         elif path == "/api/search":
             query = parse_qs(parsed.query, keep_blank_values=True)
             self.json(self.server.workspace.search(
@@ -140,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             raise ValidationError("请求长度无效") from None
         if not 0 < length <= MAX_REQUEST or self.headers.get("Transfer-Encoding"):
-            self.json({"error": "请求为空或超过3 MiB限制"}, 413)
+            self.json({"error": "请求为空或超过33 MiB限制"}, 413)
             return
         self.connection.settimeout(15)
         payload = self.rfile.read(length)
@@ -150,21 +156,35 @@ class Handler(BaseHTTPRequestHandler):
         # does not reset connections that still contain unread request bytes.
         if not self.allowed(mutation=True):
             return
-        if urlsplit(self.path).path != "/api/upload":
+        path = urlsplit(self.path).path
+        if path not in ("/api/upload", "/api/tables", "/api/table-calculate"):
             self.json({"error": "接口不存在"}, 404)
             return
         if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
             raise ValidationError("请求需要JSON格式")
         data = json.loads(payload)
-        if not isinstance(data, dict) or not isinstance(data.get("content"), str):
+        if not isinstance(data, dict):
+            raise ValidationError("请求格式无效")
+        if path == '/api/table-calculate':
+            identifier = data.get('table_id')
+            if not isinstance(identifier, str):
+                raise ValidationError('表格 ID 无效')
+            self.json(self.server.workspace.tables.calculate(identifier, data), 201)
+            return
+        if not isinstance(data.get("content"), str):
             raise ValidationError("文件字段格式无效")
         encoded = data["content"]
-        if len(encoded) > ((MAX_UPLOAD_BYTES + 2) // 3) * 4:
-            raise ValidationError("文件不能超过2 MiB")
+        maximum = MAX_TABLE_BYTES if path == '/api/tables' else MAX_UPLOAD_BYTES
+        if len(encoded) > ((maximum + 2) // 3) * 4:
+            raise ValidationError("文件超过允许的大小")
         try:
             content = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError):
             raise ValidationError("文件内容必须使用有效Base64编码") from None
+        if path == '/api/tables':
+            result = self.server.workspace.tables.import_csv(data.get('name'), content, data.get('header_row', 1))
+            self.json(result, 201)
+            return
         result = self.server.workspace.upload(data.get("name"), content)
         self.json(result, 200 if result["duplicate"] else 201)
 

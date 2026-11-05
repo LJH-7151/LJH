@@ -6,11 +6,13 @@ from .common import digest, now, uid
 from .formats import parse_text
 from .retrieval import search
 from .storage import Store
+from .table_store import TableStore
 
 
 class Workspace:
     def __init__(self, root):
         self.store = Store(root)
+        self.tables = TableStore(self.store)
 
     def documents(self):
         return self.store.documents()
