@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     UNIQUE(document_id, position)
 );
 CREATE INDEX IF NOT EXISTS chunks_document ON chunks(document_id, position);
+CREATE TABLE IF NOT EXISTS chunk_locations (
+    chunk_id TEXT PRIMARY KEY REFERENCES chunks(id), location TEXT NOT NULL
+);
 """
 DOCUMENT_QUERY = """
 SELECT d.id, d.title, u.name AS filename, u.sha256, u.size, u.created_at,
@@ -47,11 +50,11 @@ class Store:
             ).fetchall()
             app_id = con.execute("PRAGMA application_id").fetchone()[0]
             version = con.execute("PRAGMA user_version").fetchone()[0]
-            if (existing and app_id != APPLICATION_ID) or version not in (0, 1):
+            if (existing and app_id != APPLICATION_ID) or version not in (0, 1, 2):
                 raise ValueError("数据目录不属于此基础版本，请使用新的空数据目录")
             con.executescript(SCHEMA)
             con.execute(f"PRAGMA application_id={APPLICATION_ID}")
-            con.execute("PRAGMA user_version=1")
+            con.execute("PRAGMA user_version=2")
         (self.root / "blobs").mkdir(exist_ok=True)
 
     @contextmanager
@@ -88,14 +91,14 @@ class Store:
     def chunks(self, document_id):
         with self.connect() as con:
             rows = con.execute(
-                "SELECT * FROM chunks WHERE document_id=? ORDER BY position",
+                "SELECT c.*, l.location AS explicit_location FROM chunks c LEFT JOIN chunk_locations l ON l.chunk_id=c.id WHERE c.document_id=? ORDER BY c.position",
                 (document_id,),
             ).fetchall()
         result = []
         for row in rows:
             chunk = dict(row)
             start, end = chunk["start_line"], chunk["end_line"]
-            chunk["location"] = f"第{start}行" if start == end else f"第{start}–{end}行"
+            chunk["location"] = chunk.pop('explicit_location') or (f"第{start}行" if start == end else f"第{start}–{end}行")
             result.append(chunk)
         return result
 
@@ -111,21 +114,24 @@ class Store:
             FROM chunks c
             JOIN documents d ON d.id=c.document_id
             JOIN uploads u ON u.id=d.upload_id
+            LEFT JOIN chunk_locations l ON l.chunk_id=c.id
+            LEFT JOIN enterprise_metadata m ON m.document_id=d.id
         """
+        conditions.append('COALESCE(m.archived, 0)=0')
         where = " WHERE " + " AND ".join(conditions)
         with self.connect() as con:
             total = con.execute("SELECT COUNT(*) " + source + where, parameters).fetchone()[0]
             rows = con.execute(
                 """SELECT c.id AS chunk_id, c.document_id, c.position,
                           c.start_line, c.end_line, c.content,
-                          d.title, u.name AS filename, u.sha256 """
+                          d.title, u.name AS filename, u.sha256, l.location AS explicit_location """
                 + source + where
                 + " ORDER BY u.created_at DESC, d.id DESC, c.position, c.id LIMIT ?",
                 [*parameters, limit],
             ).fetchall()
         return total, [dict(row) for row in rows]
 
-    def save(self, upload, document, chunks):
+    def save(self, upload, document, chunks, locations=()):
         with self.connect() as con:
             con.execute(
                 "INSERT INTO uploads(id,name,sha256,size,created_at) VALUES(?,?,?,?,?)",
@@ -136,3 +142,4 @@ class Store:
                 "INSERT INTO chunks(id,document_id,position,start_line,end_line,content) VALUES(?,?,?,?,?,?)",
                 chunks,
             )
+            con.executemany('INSERT INTO chunk_locations(chunk_id, location) VALUES (?,?)', locations)

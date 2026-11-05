@@ -20,6 +20,7 @@ class TableAnalysisTests(unittest.TestCase):
         self.assertEqual(first['source_locations'], ['表1!2', '表1!3'])
         self.assertEqual(result['selected'], 4)
         self.assertEqual(result['missing'], 1)
+        self.assertEqual(result['missing_locations'], ['表1!4'])
 
     def test_filter_and_count_without_measure(self):
         result = aggregate(self.rows, columns=self.columns, operation='count',
@@ -41,6 +42,26 @@ class TableAnalysisTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             aggregate(self.rows, columns=self.columns, operation='count',
                       filters=[{'column':'未知','operator':'equals','value':'x'}])
+
+    def test_numeric_filter_does_not_order_as_text(self):
+        rows=[SourceRow('A1',{'金额':'2'}),SourceRow('A2',{'金额':'10'}),SourceRow('A3',{'金额':'错误'})]
+        result=aggregate(rows,columns=['金额'],operation='count',
+                         filters=[{'column':'金额','operator':'gte','value':'9'}])
+        self.assertEqual(result['groups'][0]['source_locations'],['A2'])
+
+    def test_widely_different_scales_are_not_silently_rounded(self):
+        rows=[SourceRow('A1',{'金额':'999999999999999.999'}),SourceRow('A2',{'金额':'0.000000000000001'})]
+        result=aggregate(rows,columns=['金额'],operation='sum',measure='金额')
+        self.assertEqual(result['groups'][0]['value'],'999999999999999.999000000000001')
+
+    def test_percentage_column_keeps_display_scale(self):
+        result=aggregate([SourceRow('A1',{'比例':'78%'}),SourceRow('A2',{'比例':'82％'})],
+                         columns=['比例'],operation='average',measure='比例')
+        self.assertEqual(Decimal(result['groups'][0]['value']),Decimal('80'))
+
+    def test_malformed_thousands_separator_is_not_guessed(self):
+        with self.assertRaises(ValidationError):
+            aggregate([SourceRow('A1',{'金额':'1,2'})],columns=['金额'],operation='sum',measure='金额')
 
 
 if __name__ == '__main__':

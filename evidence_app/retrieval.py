@@ -36,7 +36,7 @@ def search(store, query, document_id=None, limit=20):
     for row in rows:
         content = row.pop("content")
         start, end = row["start_line"], row["end_line"]
-        row["location"] = f"第{start}行" if start == end else f"第{start}–{end}行"
+        row["location"] = row.pop('explicit_location') or (f"第{start}行" if start == end else f"第{start}–{end}行")
         row["excerpt"] = excerpt(content, terms)
         results.append(row)
     return {

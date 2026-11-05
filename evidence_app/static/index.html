@@ -8,6 +8,14 @@
     <title>溯证 · 本地资料库</title>
     <link rel="stylesheet" href="/style.css">
     <script src="/app.js" defer></script>
+    <script src="/table-ui.js" defer></script>
+    <script src="/analysis-ui.js" defer></script>
+    <script src="/catalog-ui.js" defer></script>
+    <script src="/ocr-ui.js" defer></script>
+    <script src="/ledger-ui.js" defer></script>
+    <script src="/semantic-ui.js" defer></script>
+    <script src="/migration-ui.js" defer></script>
+    <script src="/services-ui.js" defer></script>
   </head>
   <body>
     <header class="site-header">
@@ -16,21 +24,31 @@
       <span id="service-status" class="service-status" role="status">正在连接服务…</span>
     </header>
 
+    <nav class="workspace-nav" aria-label="工作区导航">
+      <a href="#analysis-title">分析档案</a><a href="#table-title">数据分析</a>
+      <a href="#library-title">资料库</a><a href="#search-title">联合查询</a>
+      <a href="#semantic-title">语义检索</a><a href="#catalog-title">资料版本</a>
+      <a href="#ocr-title">OCR复核</a><a href="#ledger-title">订单退款</a>
+    </nav>
+
     <main>
       <section class="intro" aria-labelledby="page-title">
         <p class="eyebrow">从原始资料开始</p>
         <h1 id="page-title">每一段内容，都有出处。</h1>
         <p class="intro-description">导入文本，检索原文，查看原始行号与文件指纹。</p>
+        <a href="/api/backup">下载资料备份</a>
+        <button id="check-services" type="button" class="button button-quiet">检查本地模型服务</button><span id="services-status" role="status"></span>
+        <p id="migration-notice" hidden></p><a id="migration-download" href="/api/migration/previous-database" hidden>下载旧版数据库快照</a>
       </section>
 
       <section class="upload-panel" aria-labelledby="upload-title">
         <div class="upload-description">
           <h2 id="upload-title">添加资料</h2>
-          <p>支持 UTF-8 编码的 .txt / .md 文件，单个文件不超过 2 MiB。资料保存在本机。</p>
+          <p>支持 UTF-8 或 GB18030 文本、Markdown、DOCX 和文本 PDF，单个文件不超过 24 MiB。资料保存在本机。</p>
         </div>
         <form id="upload-form" class="upload-form">
-          <label class="visually-hidden" for="file-input">选择 TXT 或 Markdown 文件</label>
-          <input id="file-input" name="file" type="file" accept=".txt,.md" required>
+          <label class="visually-hidden" for="file-input">选择资料文件</label>
+          <input id="file-input" name="file" type="file" accept=".txt,.md,.docx,.pdf" required>
           <button id="upload-button" class="button button-primary" type="submit">导入资料</button>
         </form>
       </section>
@@ -47,6 +65,130 @@
         </form>
         <p id="search-status" class="search-status" role="status" aria-live="polite">输入关键词，查找本地资料中的原文段落。</p>
         <ol id="search-results" class="search-results" aria-label="检索结果" hidden></ol>
+      </section>
+
+      <section class="search-panel panel" aria-labelledby="semantic-title">
+        <h2 id="semantic-title">本地语义检索</h2>
+        <p>先使用本机 Embedding 服务构建索引；相似度只用于排序，请查看原文核对。</p>
+        <button id="semantic-build" type="button" class="button button-quiet">构建本地索引</button>
+        <form id="semantic-search" class="search-form"><label>查询<input id="semantic-query" maxlength="2000" required></label><button class="button button-primary">语义检索</button></form>
+        <p id="semantic-message" role="status" aria-live="polite"></p><div id="semantic-results"></div>
+      </section>
+
+      <section class="search-panel panel" aria-labelledby="ledger-title">
+        <h2 id="ledger-title">订单与退款核算</h2>
+        <p>支持常见中英文表头。订单需有订单号、明细号、商品编码、支付金额、支付时间和状态；退款需有退款号、订单号、明细号、退款金额、退款时间和状态。金额为人民币元。</p>
+        <form id="ledger-import" class="search-form">
+          <label>来源或店铺<input id="ledger-namespace" maxlength="100" required></label>
+          <label>类型<select id="ledger-kind"><option value="orders">订单</option><option value="refunds">退款</option></select></label>
+          <label>表格文件<input id="ledger-file" type="file" accept=".csv,.xlsx" required></label>
+          <label>表头行<input id="ledger-header" type="number" min="1" max="100" value="1"></label>
+          <label>工作表名称（可选）<input id="ledger-sheet" maxlength="100"></label>
+          <label><input id="ledger-update" type="checkbox">允许更新已有记录</label>
+          <button class="button button-primary">导入明细</button>
+        </form>
+        <form id="ledger-calculate" class="search-form">
+          <label>开始日期<input id="ledger-start" type="date" required></label>
+          <label>结束日期（不含）<input id="ledger-end" type="date" required></label>
+          <label>退款截止日期<input id="ledger-cutoff" type="date" required></label>
+          <label>退款口径<select id="ledger-refund-mode"><option value="cohort">按支付订单归属</option><option value="occurred">按退款发生日期</option></select></label>
+          <label>来源或店铺（可选）<input id="ledger-filter-namespace" maxlength="100"></label>
+          <label>商品编码（逗号分隔）<input id="ledger-skus"></label>
+          <label>基准开始（可选）<input id="ledger-baseline-start" type="date"></label>
+          <label>基准结束（不含）<input id="ledger-baseline-end" type="date"></label>
+          <button class="button button-primary">生成快照</button>
+        </form>
+        <label>历史核算<select id="ledger-history"><option value="">选择快照</option></select></label>
+        <button id="ledger-recompute" type="button" class="button button-quiet">复算所选快照</button>
+        <a id="ledger-export" hidden>下载核算与来源 Excel</a>
+        <div id="ledger-sources"></div>
+        <p id="ledger-message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="search-panel panel" aria-labelledby="ocr-title">
+        <h2 id="ocr-title">图片和扫描件识别与复核</h2>
+        <p>支持图片与最多50页 PDF。识别后请对照原件修正文字，确认后才可检索。</p>
+        <form id="ocr-upload" class="search-form"><label>文件<input id="ocr-file" type="file" accept=".png,.jpg,.jpeg,.bmp,.tif,.tiff,.pdf" required></label><button class="button button-primary">开始识别</button></form>
+        <label>识别记录<select id="ocr-select"></select></label>
+        <p><a id="ocr-original" hidden>下载原图核对</a></p>
+        <label>复核文字<textarea id="ocr-text" rows="8"></textarea></label>
+        <button id="ocr-confirm" class="button button-primary" type="button">确认并加入资料库</button>
+        <p id="ocr-message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="search-panel panel" aria-labelledby="catalog-title">
+        <h2 id="catalog-title">资料目录与版本</h2>
+        <form id="catalog-form" class="search-form">
+          <label>资料<select id="catalog-document" required></select></label>
+          <label>企业<input id="catalog-entity" maxlength="500"></label>
+          <label>类别<input id="catalog-category" maxlength="500"></label>
+          <label>部门<input id="catalog-department" maxlength="500"></label>
+          <label>期间<input id="catalog-period" maxlength="500"></label>
+          <label>统计范围<input id="catalog-scope" maxlength="500"></label>
+          <label>来源<input id="catalog-source" maxlength="500"></label>
+          <label>标签<input id="catalog-tags" maxlength="500"></label>
+          <label>发布日期<input id="catalog-published_at" type="date"></label>
+          <label>生效开始<input id="catalog-effective_start" type="date"></label>
+          <label>生效结束（不含）<input id="catalog-effective_end" type="date"></label>
+          <label>版本<input id="catalog-version" maxlength="500"></label>
+          <label>替代旧版本<select id="catalog-supersedes"></select></label>
+          <label><input id="catalog-archived" type="checkbox">已归档</label>
+          <button class="button button-primary">保存资料信息</button>
+        </form>
+        <p id="catalog-message" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="search-panel panel" aria-labelledby="analysis-title">
+        <h2 id="analysis-title">资料分析与档案</h2>
+        <p>输入问题或关键词，系统拆解检索词并保留来源；模型模式使用本机模型并校验引用。</p>
+        <form id="analysis-form" class="search-form">
+          <label>问题或关键词<input id="analysis-question" required maxlength="2000" placeholder="例如：合同 付款期限"></label>
+          <label>方式<select id="analysis-mode"><option value="extract">原文摘录</option><option value="local_model">本地模型辅助</option></select></label>
+          <label>视角<select id="analysis-lens"><option value="general">资料联合分析</option><option value="operations">运营分析</option><option value="company">企业分析</option><option value="data">数据分析</option></select></label>
+          <label>自定义检索任务（每行一项，留空自动拆解）<textarea id="analysis-tasks" rows="3"></textarea></label>
+          <label><input id="analysis-use-scope" type="checkbox">仅分析所选资料</label>
+          <label>资料范围（可多选）<select id="analysis-scope" multiple size="4"></select></label>
+          <label>关联统计（可多选）<select id="analysis-calculations" multiple size="4"></select></label>
+          <button id="analysis-refresh-scope" type="button" class="button button-quiet">刷新范围</button>
+          <button class="button button-primary">生成分析</button>
+        </form>
+        <label>历史档案<select id="analysis-history"><option value="">选择档案</option></select></label>
+        <p id="analysis-message" role="status" aria-live="polite"></p>
+        <div id="analysis-result"></div>
+        <form id="analysis-review" class="search-form">
+          <label>核对事项<select id="analysis-issue"></select></label>
+          <label>状态<select id="analysis-review-status"><option value="pending">待核对</option><option value="confirmed">已确认</option><option value="resolved">已处理</option></select></label>
+          <label>核对说明<input id="analysis-review-note" maxlength="2000"></label>
+          <button class="button button-quiet">保存核对记录</button>
+        </form><div id="analysis-reviews"></div>
+      </section>
+
+      <section class="search-panel panel" aria-labelledby="table-title">
+        <h2 id="table-title">数据统计与来源</h2>
+        <p>导入 CSV 或 XLSX；按原始列单位计算，结果保留来源位置。</p>
+        <form id="table-upload" class="search-form">
+          <label>表格文件<input id="table-file" type="file" accept=".csv,.xlsx" required></label>
+          <label>表头行<input id="table-header" type="number" min="1" max="100" value="1"></label>
+          <label>工作表名称（可选）<input id="table-sheet" type="text" maxlength="100"></label>
+          <button class="button button-primary">导入表格</button>
+        </form>
+        <form id="table-query" class="search-form">
+          <label>数据表<select id="table-select" required></select></label>
+          <label>数值列<select id="table-measure"></select></label>
+          <label>分组列<select id="table-group"></select></label>
+          <label>筛选列<select id="table-filter-column"></select></label>
+          <label>筛选方式<select id="table-filter-op"><option value="equals">等于</option><option value="contains">包含</option><option value="gte">大于等于</option><option value="lte">小于等于</option></select></label>
+          <label>筛选值<input id="table-filter-value" maxlength="300"></label>
+          <div id="table-extra-filters"></div><button id="table-add-filter" type="button" class="button button-quiet">增加筛选条件</button>
+          <label>统计方式<select id="table-operation"><option value="sum">合计</option><option value="average">平均</option><option value="min">最小</option><option value="max">最大</option><option value="count">行数</option></select></label>
+          <button class="button button-primary">计算</button>
+        </form>
+        <p id="table-message" role="status" aria-live="polite"></p>
+        <label>历史统计<select id="table-history"><option value="">选择统计记录</option></select></label>
+        <button id="table-preview-button" type="button" class="button button-quiet">查看列质量与原始行</button>
+        <a id="table-original" hidden>下载表格原件</a>
+        <div id="table-preview"></div>
+        <div id="table-results"></div>
       </section>
 
       <div class="workspace">
@@ -70,7 +212,7 @@
               <div><dt>内容段数</dt><dd id="document-chunk-count"></dd></div>
               <div class="hash-field"><dt>原件 SHA-256</dt><dd><code id="document-hash"></code></dd></div>
             </dl>
-            <div class="source-heading"><h3>原文与行号</h3><p>保留原始文本，Markdown 以纯文本展示。</p></div>
+            <div class="source-heading"><h3>原文与来源位置</h3><p>Markdown 以纯文本展示，DOCX 标注段落或表格位置。</p></div>
             <div id="chunk-list" class="chunk-list"></div>
           </div>
         </section>

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const MAX_FILE_SIZE = 2 * 1024 * 1024;
+  const MAX_FILE_SIZE = 24 * 1024 * 1024;
   const elements = {
     serviceStatus: document.querySelector("#service-status"),
     uploadForm: document.querySelector("#upload-form"),
@@ -333,15 +333,15 @@
     if (uploading || refreshing) return;
     const file = elements.fileInput.files[0];
     if (!file) {
-      showNotice("请先选择一份 TXT 或 Markdown 文件。", "error");
+      showNotice("请先选择一份资料文件。", "error");
       return;
     }
-    if (!/\.(txt|md)$/i.test(file.name)) {
-      showNotice("请选择 .txt 或 .md 文件。", "error");
+    if (!/\.(txt|md|docx|pdf)$/i.test(file.name)) {
+      showNotice("请选择 .txt、.md、.docx 或 .pdf 文件。", "error");
       return;
     }
     if (file.size === 0 || file.size > MAX_FILE_SIZE) {
-      showNotice(file.size === 0 ? "文件为空，请选择包含文字的文件。" : "文件超过 2 MiB，请选择较小的文件。", "error");
+      showNotice(file.size === 0 ? "文件为空，请选择包含文字的文件。" : "文件超过 24 MiB，请选择较小的文件。", "error");
       return;
     }
     uploading = true;
@@ -350,11 +350,6 @@
     showNotice("正在导入资料…", "info");
     try {
       const buffer = await file.arrayBuffer();
-      try {
-        new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-      } catch {
-        throw new Error("文件不是有效的 UTF-8 文本，请转换编码后重试。");
-      }
       const result = await requestJson("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Local-Token": localToken },
@@ -362,6 +357,7 @@
       });
       elements.fileInput.value = "";
       const refreshed = await refreshDocuments(result.document.id);
+      window.dispatchEvent(new Event('evidence:documents-changed'));
       if (refreshed) {
         showNotice(result.duplicate ? "这份原件已在资料库中，已打开已有记录。" : "资料已导入，可查看原文与行号。");
       } else {
@@ -376,6 +372,10 @@
   });
 
   elements.refreshButton.addEventListener("click", () => refreshDocuments());
+  window.addEventListener('evidence:open-source',event=>{
+    const data=event.detail;
+    if(data && typeof data.documentId==='string' && typeof data.chunkId==='string') selectDocument(data.documentId,data.chunkId);
+  });
   elements.fileInput.addEventListener("change", () => { elements.notice.hidden = true; });
   elements.searchForm.addEventListener("submit", searchDocuments);
   elements.searchQuery.addEventListener("input", () => invalidateSearch("关键词已修改，请重新检索。"));

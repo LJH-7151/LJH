@@ -3,7 +3,7 @@ from pathlib import PurePosixPath
 
 from .common import ValidationError
 
-MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+MAX_UPLOAD_BYTES = 24 * 1024 * 1024
 
 
 def parse_text(name, content):
@@ -14,11 +14,14 @@ def parse_text(name, content):
     if PurePosixPath(name).suffix.lower() not in (".txt", ".md"):
         raise ValidationError("第一阶段只支持 UTF-8 编码的 TXT 和 Markdown 文件")
     if not isinstance(content, bytes) or not 0 < len(content) <= MAX_UPLOAD_BYTES:
-        raise ValidationError("文件不能为空，且不能超过2 MiB")
+        raise ValidationError("文件不能为空，且不能超过24 MiB")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
-        raise ValidationError("文件不是有效 UTF-8，请转换编码后再上传") from None
+        try:
+            text = content.decode('gb18030')
+        except UnicodeDecodeError:
+            raise ValidationError("文本编码应为 UTF-8 或 GB18030") from None
     if "\x00" in text or not text.strip():
         raise ValidationError("文件必须包含有效的非空文本")
 

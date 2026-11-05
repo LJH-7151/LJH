@@ -2,6 +2,11 @@
 data/
 data-*/
 output/
+.local-models/
+.playwright-cli/
+*.gguf
+*.onnx
+*.part
 *.sqlite
 *.sqlite3
 *.db

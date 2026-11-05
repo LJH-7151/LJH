@@ -10,12 +10,12 @@ import support
 
 
 class FoundationHTTPTests(support.HTTPFixture):
-    def test_health_identifies_the_foundation_milestone(self):
+    def test_health_identifies_the_enterprise_milestone(self):
         status, payload = self.json_request("GET", "/api/health")
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["version"], "0.1.1")
-        self.assertEqual(payload["milestone"], "day2")
+        self.assertEqual(payload["version"], "0.3.0")
+        self.assertEqual(payload["milestone"], "enterprise")
         self.assertEqual(self.documents(), [])
 
     def test_upload_list_text_and_download_form_a_complete_round_trip(self):
@@ -120,7 +120,7 @@ class FoundationHTTPTests(support.HTTPFixture):
                 self.assertEqual(self.documents(), [])
 
     def test_document_size_limit_rejects_excess_without_persisting_it(self):
-        status, error = self.upload(b"x" * (2 * 1024 * 1024 + 1), name="oversize.txt")
+        status, error = self.upload(b"x" * (24 * 1024 * 1024 + 1), name="oversize.txt")
         self.assertIn(status, (400, 413))
         self.assertIn("error", error)
         self.assertEqual(self.documents(), [])
