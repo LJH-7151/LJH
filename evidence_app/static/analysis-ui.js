@@ -43,7 +43,7 @@
       const line=document.createElement('p'); line.textContent=`${item.state || '待核对'}：${item.metric || '来源差异'}。${item.note || ''}`; box.append(line);
     }
     for (const item of analysis.gaps || []) { const line=document.createElement('p'); line.textContent=`材料缺口：${item.title || item.material || ''} ${item.reason || ''}`; box.append(line); }
-    for (const item of analysis.actions || []) { const line=document.createElement('p'); line.textContent=`建议：${item.text || ''}`; box.append(line); }
+    for (const item of analysis.actions || []) { const line=document.createElement('p'); line.textContent=`建议：${item.text || ''}`; box.append(line); for(const [key,label] of [['owner','建议负责角色'],['timeframe','建议时段'],['metric','衡量指标'],['validation','风险与验证']]) { if(item[key]) { const detail=document.createElement('p'); detail.textContent=`${label}：${item[key]}`; box.append(detail); } } }
     const issues=$('analysis-issue'); issues.replaceChildren();
     for(const item of [...(analysis.conflicts || []),...(analysis.legacy_conflicts || []),...(analysis.gaps || [])]) {
       if(!item.id) continue; const option=document.createElement('option'); option.value=item.id; option.textContent=item.metric || item.title || '待核对事项'; issues.append(option);
@@ -51,6 +51,7 @@
     for (const text of analysis.limitations) { const note=document.createElement('p'); note.textContent=text; box.append(note); }
     const download=document.createElement('a'); download.textContent='下载 Word 分析档案';
     download.href='/api/analysis-export?id='+encodeURIComponent(analysis.id); box.append(download);
+    const sheet=document.createElement('a'); sheet.textContent='下载分析 Excel'; sheet.href=download.href+'&format=xlsx'; box.append(document.createTextNode('　'),sheet);
     tell(`已保存，检索到 ${analysis.sources.length} 条原文。`);
     showReviews().catch(error=>tell(error.message));
   }
@@ -75,11 +76,11 @@
   window.addEventListener('evidence:documents-changed',()=>scope().catch(()=>{}));
   window.addEventListener('evidence:tables-changed',()=>scope().catch(()=>{}));
   $('analysis-form').addEventListener('submit',async event => {
-    event.preventDefault(); const button=event.submitter; button.disabled=true; tell('正在分析，本地模型可能需要较长时间…');
+    event.preventDefault(); const button=event.submitter; button.disabled=true; tell('正在分析，请稍候…');
     try { const selected=$('analysis-use-scope').checked ? [...$('analysis-scope').selectedOptions].map(item=>item.value) : null;
       const calculations=[...$('analysis-calculations').selectedOptions].map(item=>item.value);
       const tasks=$('analysis-tasks').value.split('\n').map(value=>value.trim()).filter(Boolean);
-      const result=await request('/api/analyze',{question:$('analysis-question').value,mode:$('analysis-mode').value,lens:$('analysis-lens').value,selected_ids:selected,calculation_ids:calculations,tasks:tasks.length?tasks:null}); display(result); await history(); $('analysis-history').value=result.id; }
+      const result=await request('/api/analyze',{question:$('analysis-question').value,mode:$('analysis-mode').value,external_confirmed:$('analysis-consent').checked,lens:$('analysis-lens').value,selected_ids:selected,calculation_ids:calculations,tasks:tasks.length?tasks:null}); display(result); await history(); $('analysis-history').value=result.id; }
     catch(error) { tell(error.message); } finally { button.disabled=false; }
   });
   $('analysis-history').addEventListener('change',async event => {

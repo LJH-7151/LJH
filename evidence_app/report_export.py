@@ -57,12 +57,17 @@ def word_report(archive, reviews=()):
     paragraph('经营分析报告 · ' + archive['created_at'], 'Subtitle')
     paragraph('一、分析结论', 'Heading1')
     lookup = {source['id']: source for source in archive['sources']}
+    references = {}
     for index, conclusion in enumerate(archive['conclusions'], 1):
-        paragraph(str(index) + '. ' + conclusion['text'])
+        markers=[]
         for citation in conclusion.get('citations', []):
-            source = lookup.get(citation.get('id'))
-            if source:
-                paragraph('依据：《' + source['title'] + '》' + source['location'] + '：' + citation['quote'])
+            identifier=citation.get('id')
+            if identifier not in lookup: continue
+            if identifier not in references:
+                references[identifier]=(len(references)+1,citation.get('quote',''))
+            marker='['+str(references[identifier][0])+']'
+            if marker not in markers: markers.append(marker)
+        paragraph(str(index) + '. ' + conclusion['text'] + (' ' + ' '.join(markers) if markers else ''))
     charts = []
     for source in archive['sources']:
         if source.get('metadata', {}).get('category') != '计算证据':
@@ -79,22 +84,32 @@ def word_report(archive, reviews=()):
         for detail, chart in charts[:4]:
             index = len(images) + 1
             images.append(chart)
-            paragraph(str(detail.get('measure') or '指标') + ' · 按' + str(detail.get('group_by') or '分组'))
+            paragraph(str(detail.get('measure') or '指标') + ' · 按' + str(detail.get('group_by') or '分组') + ('（前12组）' if len(detail.get('groups', [])) > 12 else ''))
             parts.append('<w:p><w:r><w:drawing><wp:inline><wp:extent cx="5486400" cy="2011680"/><wp:docPr id="' + str(index) + '" name="Chart ' + str(index) + '"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="' + str(index) + '" name="Chart"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="img' + str(index) + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="5486400" cy="2011680"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>')
             paragraph('；'.join(str(g.get('group')) + '：' + str(g.get('value')) for g in detail.get('groups', [])[:12]))
             paragraph('口径：' + str(detail.get('operation')) + '；有效记录数：' + str(detail.get('selected', '')))
-    paragraph('三、行动建议', 'Heading1')
+    paragraph('三、行动建议' if charts else '二、行动建议', 'Heading1')
     for action in archive.get('actions', []):
         paragraph('• ' + action.get('text', ''))
+        for key,label in (('owner','建议负责角色'),('timeframe','建议时段'),('metric','衡量指标'),('validation','风险与验证')):
+            if action.get(key): paragraph(label + '：' + str(action[key]))
     if not archive.get('actions'):
         paragraph('结合上述结论安排责任人、执行时间和复核指标。')
     issues = archive.get('conflicts', []) + archive.get('legacy_conflicts', []) + archive.get('gaps', [])
     if issues or reviews:
-        paragraph('四、待核对事项', 'Heading1')
+        paragraph('四、待核对事项' if charts else '三、待核对事项', 'Heading1')
         for issue in issues:
             paragraph(str(issue.get('title') or issue.get('metric') or '来源差异') + '：' + str(issue.get('reason') or issue.get('note') or '请核对期间、范围和口径。'))
         for review in reviews:
             paragraph(str(review['created_at']) + ' · ' + str(review['status']) + ' ? ' + str(review['note']))
+    if references:
+        paragraph('依据来源', 'Heading1')
+        for identifier,(number,quote) in references.items():
+            source=lookup[identifier]
+            description='['+str(number)+'] 《'+source.get('title','')+'》'+source.get('location','')
+            if source.get('metadata', {}).get('category') != '计算证据' and quote:
+                description+='：'+quote[:200]+('…' if len(quote)>200 else '')
+            paragraph(description)
     paragraph('分析说明', 'Heading1')
     for note in archive.get('limitations', []):
         paragraph(note)
@@ -109,6 +124,46 @@ def word_report(archive, reviews=()):
     }
     for i, chart in enumerate(images, 1):
         files['word/media/chart' + str(i) + '.png'] = chart
+    return _zip(files)
+
+
+def analysis_spreadsheet(archive, reviews=()):
+    """Export analysis, actions and source text as literal spreadsheet cells."""
+    sources={source['id']:source for source in archive['sources']}
+    answers=[['结论','证据编号','资料','位置','引用']]
+    for conclusion in archive['conclusions']:
+        for citation in conclusion.get('citations', []):
+            source=sources.get(citation.get('id'), {})
+            answers.append([conclusion['text'],citation.get('id',''),source.get('title',''),source.get('location',''),citation.get('quote','')])
+    actions=[['建议','负责角色','建议时段','衡量指标','风险与验证','证据编号']]
+    for action in archive.get('actions', []):
+        actions.append([action.get('text',''),action.get('owner',''),action.get('timeframe',''),action.get('metric',''),action.get('validation',''),'、'.join(action.get('evidence_ids',[]))])
+    evidence=[['证据编号','资料','位置','原文片段','片段序号']]
+    for source in archive['sources']:
+        content=str(source.get('content',''))
+        for offset in range(0,max(1,len(content)),30000):
+            evidence.append([source['id'],source.get('title',''),source.get('location',''),content[offset:offset+30000],str(offset//30000+1)])
+    notes=[['事项','说明']]
+    for issue in archive.get('gaps', []): notes.append([issue.get('title',''), issue.get('reason','')])
+    for review in reviews: notes.append([review.get('status',''),review.get('note','')])
+    sheets=[('回答与引用',answers),('行动建议',actions),('来源',evidence),('待核对',notes)]
+    files={
+        '[Content_Types].xml':'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+''.join('<Override PartName="/xl/worksheets/sheet'+str(i)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' for i in range(1,len(sheets)+1))+'</Types>',
+        '_rels/.rels':'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="r1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
+        'xl/workbook.xml':'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+''.join('<sheet name="'+_text(name)+'" sheetId="'+str(i)+'" r:id="r'+str(i)+'"/>' for i,(name,_) in enumerate(sheets,1))+'</sheets></workbook>',
+        'xl/_rels/workbook.xml.rels':'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+''.join('<Relationship Id="r'+str(i)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+str(i)+'.xml"/>' for i in range(1,len(sheets)+1))+'</Relationships>',
+    }
+    for i,(_,rows) in enumerate(sheets,1):
+        xml=[]
+        row_number=0
+        for row in rows:
+            values=[str(value) for value in row]
+            chunks=max((len(value)+29999)//30000 for value in values) if values else 1
+            for part in range(max(1,chunks)):
+                row_number+=1
+                cells=''.join('<c r="'+chr(65+column)+str(row_number)+'" t="inlineStr"><is><t xml:space="preserve">'+_text(value[part*30000:(part+1)*30000] if len(value)>30000 else value)+'</t></is></c>' for column,value in enumerate(values))
+                xml.append('<row r="'+str(row_number)+'">'+cells+'</row>')
+        files['xl/worksheets/sheet'+str(i)+'.xml']='<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'+''.join(xml)+'</sheetData></worksheet>'
     return _zip(files)
 
 

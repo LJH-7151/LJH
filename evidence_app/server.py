@@ -17,7 +17,7 @@ from .formats import MAX_UPLOAD_BYTES
 from .service import Workspace
 from .tabular_import import MAX_BYTES as MAX_TABLE_BYTES
 from .tabular_import import parse_csv, parse_xlsx
-from .report_export import word_report, table_report, ledger_report
+from .report_export import word_report, analysis_spreadsheet, table_report, ledger_report
 from .backup import create_backup
 from .sales_ledger import map_columns
 from .service_status import status as model_status
@@ -201,8 +201,14 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(200,content,'application/octet-stream',filename=draft['name'])
         elif path == "/api/analysis-export":
             identifier = parse_qs(parsed.query).get('id', [''])[0]
-            content = word_report(self.server.workspace.analyses.get(identifier),self.server.workspace.analyses.reviews(identifier))
-            self.respond(200,content,'application/vnd.openxmlformats-officedocument.wordprocessingml.document',filename='资料分析.docx')
+            archive=self.server.workspace.analyses.get(identifier)
+            reviews=self.server.workspace.analyses.reviews(identifier)
+            format=parse_qs(parsed.query).get('format',['docx'])[0]
+            if format=='xlsx':
+                self.respond(200,analysis_spreadsheet(archive,reviews),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename='分析引用与建议.xlsx')
+            elif format=='docx':
+                self.respond(200,word_report(archive,reviews),'application/vnd.openxmlformats-officedocument.wordprocessingml.document',filename='资料分析.docx')
+            else: raise ValidationError('导出格式无效')
         elif path == "/api/table-export":
             identifier = parse_qs(parsed.query).get('id', [''])[0]
             content = table_report(self.server.workspace.tables.result(identifier),self.server.workspace.tables.result_rows(identifier))
@@ -293,7 +299,7 @@ class Handler(BaseHTTPRequestHandler):
             self.json(self.server.workspace.tables.update_metadata(identifier,data.get('metadata')))
             return
         if path == '/api/analyze':
-            self.json(self.server.workspace.analyses.run(data.get('question'), data.get('document_id') or None, data.get('mode','extract'),data.get('selected_ids'),data.get('calculation_ids'),data.get('lens','general'),data.get('tasks')), 201)
+            self.json(self.server.workspace.analyses.run(data.get('question'), data.get('document_id') or None, data.get('mode','extract'),data.get('selected_ids'),data.get('calculation_ids'),data.get('lens','general'),data.get('tasks'),data.get('external_confirmed')), 201)
             return
         if path == '/api/analysis-review':
             self.json(self.server.workspace.analyses.review(data.get('id'),data.get('issue_id'),data.get('status'),data.get('note','')),201)

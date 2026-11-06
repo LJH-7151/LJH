@@ -144,6 +144,7 @@
         <form id="analysis-form" class="search-form">
           <label>问题或关键词<input id="analysis-question" required maxlength="2000" placeholder="例如：合同 付款期限"></label>
           <label>方式<select id="analysis-mode"><option value="extract">原文摘录</option><option value="local_model">本地模型辅助</option><option value="codex">Codex 智能分析</option></select></label>
+          <label><input id="analysis-consent" type="checkbox">同意将所选资料发送至模型服务</label>
           <label>视角<select id="analysis-lens"><option value="general">资料联合分析</option><option value="operations">运营分析</option><option value="company">企业分析</option><option value="data">数据分析</option></select></label>
           <label>自定义检索任务（每行一项，留空自动拆解）<textarea id="analysis-tasks" rows="3"></textarea></label>
           <label><input id="analysis-use-scope" type="checkbox">仅分析所选资料</label>

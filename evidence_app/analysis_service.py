@@ -7,6 +7,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHand
 
 from .common import ValidationError, now, uid
 from .fact_compare import compare
+from decimal import Decimal, InvalidOperation, localcontext
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -44,9 +45,11 @@ class AnalysisService:
                 issue_id TEXT NOT NULL, status TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL
             )''')
 
-    def run(self, question, document_id=None, mode='extract', selected_ids=None, calculation_ids=None,lens='general',tasks=None):
+    def run(self, question, document_id=None, mode='extract', selected_ids=None, calculation_ids=None,lens='general',tasks=None, external_confirmed=False):
         if mode not in ('extract', 'local_model', 'codex'):
             raise ValidationError('分析模式无效')
+        if mode == 'codex' and external_confirmed is not True:
+            raise ValidationError('请先同意将所选资料发送至模型服务')
         suggested=search_tasks(question,lens)
         if tasks is None:
             tasks=suggested
@@ -106,7 +109,7 @@ class AnalysisService:
             raise ValidationError('最多关联10份统计结果')
         if mode == 'codex' and document_id is None:
             from .management_metrics import calculate
-            calculation_ids = calculation_ids + calculate(self.workspace, question, selected_ids, calculation_ids)
+            calculation_ids = calculation_ids + calculate(self.workspace, question + ' ' + ' '.join(tasks), selected_ids, calculation_ids)
         for identifier in calculation_ids:
             calculation=self.workspace.tables.result(identifier)
             if self.workspace.tables.metadata(calculation['table_id']).get('archived'):
@@ -115,6 +118,23 @@ class AnalysisService:
                 raise ValidationError('统计结果不属于所选资料范围')
             display={key:calculation.get(key) for key in ('operation','measure','group_by','filters','selected','missing','invalid')}
             display['groups']=[{key:group[key] for key in ('group','value','count')} for group in calculation['groups']]
+            if calculation.get('group_by') in ('期间','签约期间','月份'):
+                groups=display['groups']
+                if groups and all(re.fullmatch(r'\d{4}-(?:0[1-9]|1[0-2])', str(g['group'])) for g in groups):
+                    display['period_changes']=[]
+                    for before,after in zip(groups, groups[1:]):
+                        try:
+                            with localcontext() as ctx:
+                                ctx.prec=80
+                                previous,current=Decimal(before['value']),Decimal(after['value'])
+                                delta=current-previous
+                                percent=(delta / previous * 100) if previous > 0 else None
+                                display['period_changes'].append({'from':before['group'],'to':after['group'],
+                                    'change':str(delta),'percent':str(percent.quantize(Decimal('0.01'))) if percent is not None else None,
+                                    'note':'仅比较相邻已有期间；百分比指标的差值为百分点，percent 为相对变化率。'})
+                        except (InvalidOperation, ValueError, TypeError):
+                            display.pop('period_changes',None)
+                            break
             table_info=next((item for item in self.workspace.tables.list() if item['id']==calculation['table_id']), None)
             if table_info and '口径' in table_info['columns']:
                 with self.workspace.store.connect() as db:
@@ -134,7 +154,11 @@ class AnalysisService:
         model_actions = []
         if mode == 'codex':
             from .codex_analysis import synthesize
-            conclusions, model_actions = synthesize(self.workspace.store, question, sources)
+            inventory=[{'title':item['name'],'columns':item['columns'],'row_count':item['row_count'],
+                        'metadata':item['metadata']} for item in self.workspace.tables.list()
+                       if not item['metadata'].get('archived') and document_id is None
+                       and (selected_ids is None or item['id'] in selected_ids)]
+            conclusions, model_actions = synthesize(self.workspace.store, question, sources, inventory)
         elif mode == 'local_model':
             conclusions = self._synthesize(question, sources)
         else:
