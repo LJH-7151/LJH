@@ -45,7 +45,7 @@ class AnalysisService:
             )''')
 
     def run(self, question, document_id=None, mode='extract', selected_ids=None, calculation_ids=None,lens='general',tasks=None):
-        if mode not in ('extract', 'local_model'):
+        if mode not in ('extract', 'local_model', 'codex'):
             raise ValidationError('分析模式无效')
         suggested=search_tasks(question,lens)
         if tasks is None:
@@ -104,6 +104,9 @@ class AnalysisService:
         if calculation_ids is None: calculation_ids=[]
         if not isinstance(calculation_ids,list) or len(calculation_ids)>10 or any(not isinstance(item,str) for item in calculation_ids):
             raise ValidationError('最多关联10份统计结果')
+        if mode == 'codex' and document_id is None:
+            from .management_metrics import calculate
+            calculation_ids = calculation_ids + calculate(self.workspace, question, selected_ids, calculation_ids)
         for identifier in calculation_ids:
             calculation=self.workspace.tables.result(identifier)
             if self.workspace.tables.metadata(calculation['table_id']).get('archived'):
@@ -112,13 +115,27 @@ class AnalysisService:
                 raise ValidationError('统计结果不属于所选资料范围')
             display={key:calculation.get(key) for key in ('operation','measure','group_by','filters','selected','missing','invalid')}
             display['groups']=[{key:group[key] for key in ('group','value','count')} for group in calculation['groups']]
+            table_info=next((item for item in self.workspace.tables.list() if item['id']==calculation['table_id']), None)
+            if table_info and '口径' in table_info['columns']:
+                with self.workspace.store.connect() as db:
+                    raw=db.execute('SELECT values_json FROM enterprise_table_rows WHERE table_id=?', (calculation['table_id'],)).fetchall()
+                notes=list(dict.fromkeys(str(json.loads(row['values_json']).get('口径', '')).strip() for row in raw))
+                notes=[note for note in notes if note]
+                if len(notes)<=3:
+                    display['scope_notes']=notes
+            if calculation.get('measure') == '未回款金额（元）' and calculation.get('group_by') == '余额状态':
+                display.setdefault('scope_notes', []).append('按余额状态汇总合同未收余额；未验收或未到期不等于逾期，也不等于会计应收账款。')
             content=json.dumps(display,ensure_ascii=False)
-            sources.append({'id':identifier,'document_id':calculation['table_id'],'title':'数据统计结果',
+            sources.append({'id':identifier,'document_id':calculation['table_id'],'title':(table_info['name'] + ' · 统计结果') if table_info else '数据统计结果',
                             'sha256':calculation['table_sha256'],'location':'计算记录',
                             'content':content,'metadata':{'category':'计算证据'}})
-        if mode == 'local_model' and not sources:
+        if mode in ('local_model', 'codex') and not sources:
             raise ValidationError('本次未检索到证据，请调整关键词后再使用模型分析')
-        if mode == 'local_model':
+        model_actions = []
+        if mode == 'codex':
+            from .codex_analysis import synthesize
+            conclusions, model_actions = synthesize(self.workspace.store, question, sources)
+        elif mode == 'local_model':
             conclusions = self._synthesize(question, sources)
         else:
             conclusions = [{'text':source['content'], 'citations':[{'id':source['id'],'quote':source['content']}]} for source in sources[:10]]
@@ -130,13 +147,15 @@ class AnalysisService:
         gaps=[{'title':'未找到直接材料：'+task['task'],
                'reason':'本次有限检索没有命中，不代表该事实不存在。',
                'material':'与该问题有关的原始记录'} for task in coverage if task['document_hits']==0 and task['table_hits']==0]
-        if '利润' in question:
+        if mode == 'codex':
+            gaps = []  # Search coverage alone does not establish missing data.
+        if '利润' in question and mode != 'codex':
             gaps.append({'title':'利润计算依据需核对','reason':'仅凭收入或费用摘录不能证明完整利润。',
                          'material':'完整成本、费用、税项及会计调整底稿'})
         for item in conflicts+gaps: item['id']=uid('issue')
-        actions=[{'text':'核对'+item['metric']+'的期间、范围、单位和适用版本。'} for item in conflicts]
+        actions=model_actions + [{'text':'核对'+item['metric']+'的期间、范围、单位和适用版本。'} for item in conflicts]
         archive = {'id':uid('analysis'), 'question':question, 'mode':mode, 'lens':lens,'document_id':document_id, 'selected_ids':selected_ids,
-                   'created_at':now(), 'sources':sources, 'conclusions':conclusions, 'model_calls':1 if mode=='local_model' else 0,
+                   'created_at':now(), 'sources':sources, 'conclusions':conclusions, 'model_calls':1 if mode in ('local_model','codex') else 0,
                    'calculation_ids':calculation_ids,
                    'tasks':coverage,
                    'conflicts':conflicts,'gaps':gaps,'actions':actions,
