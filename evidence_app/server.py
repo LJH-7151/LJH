@@ -113,7 +113,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             content = (STATIC / "index.html").read_text(encoding="utf-8").replace("__LOCAL_TOKEN__", self.server.token)
             self.respond(200, content.encode("utf-8"), "text/html; charset=utf-8")
-        elif path in ("/app.js", "/table-ui.js", "/analysis-ui.js", "/catalog-ui.js", "/ocr-ui.js", "/ledger-ui.js", "/semantic-ui.js", "/migration-ui.js", "/services-ui.js", "/style.css"):
+        elif path in ("/app.js", "/table-ui.js", "/analysis-ui.js", "/catalog-ui.js", "/ocr-ui.js", "/ledger-ui.js", "/semantic-ui.js", "/migration-ui.js", "/services-ui.js", "/style.css", "/workspace.js", "/workspace.css"):
             content_type = "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8"
             self.respond(200, (STATIC / path[1:]).read_bytes(), content_type)
         elif path == "/api/health":
